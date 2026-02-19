@@ -1,7 +1,7 @@
 ---
 name: bump-elixir-docker
 description: Bumps Elixir Dockerfile versions to latest tags from Docker Hub. Use when updating Dockerfile, bumping Elixir versions, upgrading Docker images, or modernizing container builds for Elixir projects.
-allowed-tools: Read, Edit, WebFetch, Bash
+allowed-tools: Read, Edit, Bash
 ---
 
 # Bump Elixir Docker Images
@@ -25,9 +25,9 @@ Read the Dockerfile and identify:
 
 ### 2. Find Latest OS Date/Version FIRST
 
-Query Docker Hub API with current Elixir+Erlang to find the latest OS date (Debian) or version (Alpine).
+Use **`docker manifest inspect`** probes (no WebFetch) to find the latest OS date (Debian) or version (Alpine).
 
-**Why first?** Different OS dates may have different Elixir/Erlang versions available.
+**Why first?** Different OS dates/versions may have different Elixir/Erlang versions available.
 
 ### 3. Probe for Newer Elixir/Erlang Versions
 
@@ -35,7 +35,7 @@ Using the NEW OS date/version from step 2, incrementally probe for newer Elixir/
 
 ### 4. Find Latest Base OS Image
 
-Query for the latest base OS image (debian:bookworm-YYYYMMDD-slim or alpine:X.Y.Z).
+Probe for the latest base OS image using `docker manifest inspect` (debian:bookworm-YYYYMMDD-slim or alpine:X.Y.Z).
 
 ### 5. Verify Complete Image Tags Exist
 
@@ -55,21 +55,17 @@ Only after verification, use Edit tool to update all FROM statements.
 
 **Step 1: Find Latest OS Date/Version First**
 
-Before probing Elixir/Erlang versions, find the latest OS date or version:
+Before probing Elixir/Erlang versions, find the latest OS date or version **without WebFetch**:
 
-**For Debian:**
-Query Docker Hub API with current Elixir+Erlang to find latest date:
-```
-https://hub.docker.com/v2/repositories/hexpm/elixir/tags?page_size=25&name=1.19.4-erlang-28.2
-```
-Extract the highest date (format: YYYYMMDD).
+**For Debian (bookworm):**
+- Start from the current date tag in the Dockerfile (e.g., `bookworm-20251229-slim`).
+- Probe a small set of **newer candidate dates** using `docker manifest inspect debian:bookworm-YYYYMMDD-slim`.
+- Build candidates by incrementing the **month** and testing common release days (e.g., 02, 12, 22, 29). Stop at the highest date that exists.
 
 **For Alpine:**
-Query Docker Hub API with current Elixir+Erlang to find latest Alpine version:
-```
-https://hub.docker.com/v2/repositories/hexpm/elixir/tags?page_size=25&name=1.19.4-erlang-28.2-alpine
-```
-Extract the highest Alpine version (e.g., 3.23.2).
+- Start from the current Alpine version (e.g., `3.22.2`).
+- Probe **patch bumps** first (3.22.3, 3.22.4), then **minor bumps** (3.23.0, 3.23.1, 3.23.2) using `docker manifest inspect alpine:X.Y.Z`.
+- Choose the highest version that exists.
 
 **Step 2: Probe for Newer Elixir/Erlang with NEW OS Version**
 
@@ -104,18 +100,10 @@ If a lower version doesn't exist (e.g., 1.19.5), higher versions likely don't ei
 **Step 3: Find Latest Base OS Image**
 
 **Debian base image:**
-Query with year filter to avoid old results:
-```
-https://hub.docker.com/v2/repositories/library/debian/tags?page_size=50&name=bookworm-2025
-```
-Extract the highest date with `-slim` suffix (e.g., bookworm-20251229-slim).
+Probe candidate `bookworm-YYYYMMDD-slim` tags using `docker manifest inspect debian:bookworm-YYYYMMDD-slim` and select the newest date that exists.
 
 **Alpine base image:**
-Query for Alpine 3.x series:
-```
-https://hub.docker.com/v2/repositories/library/alpine/tags?page_size=50&name=3.2
-```
-Extract the highest semantic version (e.g., 3.22.2 → 3.23.0).
+Probe candidate `alpine:X.Y.Z` tags using `docker manifest inspect alpine:X.Y.Z` and select the newest version that exists.
 
 **CRITICAL VERSION CONSTRAINT:**
 - **NEVER downgrade Elixir or Erlang versions**
@@ -216,7 +204,7 @@ After updating, provide a summary:
 4. **Version consistency**: All builder stages (deps, dev, release) must use the SAME Elixir image tag
 5. **OS matching**: The final stage OS must match the builder stage OS flavor (Debian with Debian, Alpine with Alpine)
 6. **Slim variants**: Prefer `-slim` variants for Debian to reduce image size
-7. **API limits**: Docker Hub API may paginate results; fetch enough pages to find latest versions
+7. **Probe limits**: Keep probe sets small; stop once newer versions are not found in a series
 8. **Semantic versioning**: When comparing versions, use proper semantic version sorting (1.20.1 > 1.19.4, 28.2 > 27.3)
 9. **Testing**: Always recommend running `docker build` to verify the new images work
 10. **OS updates are safe**: Even if Elixir/Erlang can't be bumped, updating Debian date or Alpine version is beneficial
@@ -247,38 +235,34 @@ After updating, provide a summary:
 8. Updates all 4 FROM statements
 9. Reports: Elixir unchanged, Erlang 28.2→28.3, Alpine 3.22.2→3.23.2
 
-## API Query Examples
+## Manifest Inspect Examples
 
-### Query for specific Elixir+Erlang combo (Debian)
+### Probe for Debian OS date
+```bash
+docker manifest inspect debian:bookworm-20260202-slim
 ```
-https://hub.docker.com/v2/repositories/hexpm/elixir/tags?page_size=25&name=1.19.4-erlang-28.2
-```
-Returns all tags with that exact Elixir+Erlang version. Extract the highest date.
 
-### Query for specific Elixir+Erlang combo (Alpine)
+### Probe for Alpine OS version
+```bash
+docker manifest inspect alpine:3.23.2
 ```
-https://hub.docker.com/v2/repositories/hexpm/elixir/tags?page_size=25&name=1.19.4-erlang-28.2-alpine
-```
-Returns all tags with that exact Elixir+Erlang version. Extract the highest Alpine version.
 
-### Query for latest Debian base tags (with year filter)
+### Probe for specific Elixir+Erlang combo (Debian)
+```bash
+docker manifest inspect hexpm/elixir:1.19.5-erlang-28.3.1-debian-bookworm-20260202-slim
 ```
-https://hub.docker.com/v2/repositories/library/debian/tags?page_size=50&name=bookworm-2025
-```
-Filters to current year to avoid old results. Extract highest date with `-slim`.
 
-### Query for latest Alpine base tags
+### Probe for specific Elixir+Erlang combo (Alpine)
+```bash
+docker manifest inspect hexpm/elixir:1.19.5-erlang-28.3.1-alpine-3.23.2
 ```
-https://hub.docker.com/v2/repositories/library/alpine/tags?page_size=50&name=3.2
-```
-Returns Alpine 3.2x series. Extract highest semantic version (e.g., 3.22.2).
 
 ## Troubleshooting
 
 - **No tags found**: Increase `page_size` or check the filter string
 - **No upgrade available**: Report current versions are latest, but still update OS date/version
 - **Version parsing fails**: Handle edge cases like rc/beta versions
-- **API timeout**: Retry with smaller page size
+- **No tag found**: Reduce the probe set and keep the current version/date
 - **Incompatible versions**: Skip tags that would downgrade Elixir or Erlang
 - **Major version bump**: Warn user if major Elixir or Erlang version increases (e.g., 1.x → 2.x)
 - **Different Elixir/Erlang versions available for Debian vs Alpine**: This is normal - probe with the NEW OS date/version, not the old one. Different OS dates may have different Elixir/Erlang versions available.
