@@ -1,7 +1,7 @@
 ---
 name: bump-elixir-docker
 description: Bumps Elixir Dockerfile versions to latest tags from Docker Hub. Use when updating Dockerfile, bumping Elixir versions, upgrading Docker images, or modernizing container builds for Elixir projects.
-allowed-tools: Read, Edit, Bash
+allowed-tools: Read, Edit, Bash, WebFetch
 ---
 
 # Bump Elixir Docker Images
@@ -25,7 +25,7 @@ Read the Dockerfile and identify:
 
 ### 2. Find Latest OS Date/Version FIRST
 
-Use **`docker manifest inspect`** probes (no WebFetch) to find the latest OS date (Debian) or version (Alpine).
+Use the **Docker Hub API via WebFetch** to find the latest OS date (Debian) or version (Alpine). Do not guess or probe dates — fetch the real tag list.
 
 **Why first?** Different OS dates/versions may have different Elixir/Erlang versions available.
 
@@ -35,7 +35,7 @@ Using the NEW OS date/version from step 2, incrementally probe for newer Elixir/
 
 ### 4. Find Latest Base OS Image
 
-Probe for the latest base OS image using `docker manifest inspect` (debian:bookworm-YYYYMMDD-slim or alpine:X.Y.Z).
+The base OS date/version was already retrieved in Step 2 via Docker Hub API — reuse that result. No separate probing needed.
 
 ### 5. Verify Complete Image Tags Exist
 
@@ -55,17 +55,22 @@ Only after verification, use Edit tool to update all FROM statements.
 
 **Step 1: Find Latest OS Date/Version First**
 
-Before probing Elixir/Erlang versions, find the latest OS date or version **without WebFetch**:
+Before probing Elixir/Erlang versions, find the latest OS date or version by **fetching the Docker Hub API**. Never guess or manually probe dates.
 
-**For Debian (bookworm):**
-- Start from the current date tag in the Dockerfile (e.g., `bookworm-20251229-slim`).
-- Probe a small set of **newer candidate dates** using `docker manifest inspect debian:bookworm-YYYYMMDD-slim`.
-- Build candidates by incrementing the **month** and testing common release days (e.g., 02, 12, 22, 29). Stop at the highest date that exists.
+Run the helper script bundled with this skill — it queries the Docker Hub API and returns a single, unambiguous answer:
 
-**For Alpine:**
-- Start from the current Alpine version (e.g., `3.22.2`).
-- Probe **patch bumps** first (3.22.3, 3.22.4), then **minor bumps** (3.23.0, 3.23.1, 3.23.2) using `docker manifest inspect alpine:X.Y.Z`.
-- Choose the highest version that exists.
+```bash
+# For Debian — outputs e.g. "bookworm-20260202-slim"
+bash ~/.claude/skills/bump-elixir-docker/fetch-docker-versions.sh debian
+
+# For Alpine — outputs e.g. "3.21.3"
+bash ~/.claude/skills/bump-elixir-docker/fetch-docker-versions.sh alpine
+
+# Both at once
+bash ~/.claude/skills/bump-elixir-docker/fetch-docker-versions.sh
+```
+
+The script fetches the Docker Hub tags API, filters for the right pattern (`bookworm-YYYYMMDD-slim` or `X.Y.Z`), and returns the newest value. It requires `curl` and one of `jq`, `python3`, or `grep` (all typically available).
 
 **Step 2: Probe for Newer Elixir/Erlang with NEW OS Version**
 
@@ -99,11 +104,7 @@ If a lower version doesn't exist (e.g., 1.19.5), higher versions likely don't ei
 
 **Step 3: Find Latest Base OS Image**
 
-**Debian base image:**
-Probe candidate `bookworm-YYYYMMDD-slim` tags using `docker manifest inspect debian:bookworm-YYYYMMDD-slim` and select the newest date that exists.
-
-**Alpine base image:**
-Probe candidate `alpine:X.Y.Z` tags using `docker manifest inspect alpine:X.Y.Z` and select the newest version that exists.
+The latest base OS date/version was already retrieved in Step 1 via the Docker Hub API — reuse that result. No additional probing needed for the base image tag.
 
 **CRITICAL VERSION CONSTRAINT:**
 - **NEVER downgrade Elixir or Erlang versions**
@@ -198,7 +199,7 @@ After updating, provide a summary:
 
 ## Important Notes
 
-1. **CRITICAL WORKFLOW ORDER**: Find latest OS date/version FIRST, then probe Elixir/Erlang with that new OS. Different OS dates have different Elixir/Erlang versions available!
+1. **CRITICAL WORKFLOW ORDER**: Find latest OS date/version FIRST (via Docker Hub API), then probe Elixir/Erlang with that new OS. Different OS dates have different Elixir/Erlang versions available!
 2. **Never downgrade**: CRITICAL - Never select Elixir or Erlang versions lower than current
 3. **Always verify images exist**: Use `docker manifest inspect` to verify both builder and base images exist BEFORE updating Dockerfile
 4. **Version consistency**: All builder stages (deps, dev, release) must use the SAME Elixir image tag
@@ -235,16 +236,15 @@ After updating, provide a summary:
 8. Updates all 4 FROM statements
 9. Reports: Elixir unchanged, Erlang 28.2→28.3, Alpine 3.22.2→3.23.2
 
-## Manifest Inspect Examples
+## Script and Manifest Inspect Examples
 
-### Probe for Debian OS date
+### Find Latest Debian Date or Alpine Version (Script)
 ```bash
-docker manifest inspect debian:bookworm-20260202-slim
-```
+# Returns e.g. "bookworm-20260202-slim"
+bash ~/.claude/skills/bump-elixir-docker/fetch-docker-versions.sh debian
 
-### Probe for Alpine OS version
-```bash
-docker manifest inspect alpine:3.23.2
+# Returns e.g. "3.21.3"
+bash ~/.claude/skills/bump-elixir-docker/fetch-docker-versions.sh alpine
 ```
 
 ### Probe for specific Elixir+Erlang combo (Debian)
