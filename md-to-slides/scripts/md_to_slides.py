@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Convert markdown file(s) into a self-contained reveal.js presentation.
+"""Convert markdown file(s) into a reveal.js presentation.
 
 Usage:
     python3 md_to_slides.py input.md [-o output.html] [--theme moon] [--title "My Talk"]
-    python3 md_to_slides.py file1.md file2.md file3.md -o combined.html
+    python3 md_to_slides.py input.md -o deck/ --theme white --custom-theme songri.css --logo logo.png
+
+When --logo or --custom-theme is used, output is a directory with index.html and assets.
+Otherwise output is a single HTML file.
 
 Slide separators:
     ---        horizontal slide break (new section)
@@ -16,8 +19,8 @@ Themes: black (default), white, league, beige, night, moon, serif, simple, sky, 
 
 import argparse
 import html
-import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -46,36 +49,20 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     return meta, body
 
 
-def split_slides(markdown: str) -> list[list[str]]:
-    """Split markdown into sections (horizontal) and sub-slides (vertical).
-
-    Returns a list of sections, where each section is a list of slide contents.
-    """
-    # Normalize line endings
-    markdown = markdown.replace("\r\n", "\n")
-
-    # Split on horizontal separator: a line that is exactly "---"
-    # (but not frontmatter, which is already stripped)
-    h_sections = re.split(r"\n---\n", markdown)
-
-    result = []
-    for section in h_sections:
-        # Split on vertical separator: a line that is exactly "--"
-        v_slides = re.split(r"\n--\n", section)
-        result.append([s.strip() for s in v_slides if s.strip()])
-
-    return [s for s in result if s]
-
-
 def build_html(
     slides_md: str,
     title: str = "Presentation",
     theme: str = "black",
     custom_css: str = "",
+    custom_theme_href: str = "",
+    logo_src: str = "",
 ) -> str:
-    """Build a self-contained reveal.js HTML presentation."""
+    """Build a reveal.js HTML presentation."""
     escaped_md = html.escape(slides_md)
     theme = theme if theme in THEMES else "black"
+
+    theme_link = f'<link rel="stylesheet" href="{custom_theme_href}">' if custom_theme_href else ""
+    logo_block = f'<img class="slide-logo" src="{logo_src}" alt="logo">' if logo_src else ""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -96,10 +83,32 @@ def build_html(
   .reveal table {{ margin: 0 auto; border-collapse: collapse; }}
   .reveal th, .reveal td {{ border: 1px solid rgba(255,255,255,0.3); padding: 0.4em 0.8em; }}
   .reveal ul, .reveal ol {{ display: block; text-align: left; }}
+  .slide-logo {{ position: fixed; top: 20px; left: 30px; height: 32px; z-index: 100; pointer-events: none; }}
+  #slide-page-counter {{
+    position: fixed;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.45);
+    color: rgba(255, 255, 255, 0.9);
+    padding: 3px 14px;
+    border-radius: 12px;
+    font-size: 0.72em;
+    font-family: sans-serif;
+    letter-spacing: 0.05em;
+    z-index: 200;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+    white-space: nowrap;
+  }}
+  #slide-page-counter.visible {{ opacity: 1; }}
   {custom_css}
 </style>
+{theme_link}
 </head>
 <body>
+{logo_block}
 <div class="reveal">
   <div class="slides">
     <section data-markdown data-separator="^---$" data-separator-vertical="^--$" data-separator-notes="^Note:">
@@ -114,13 +123,32 @@ def build_html(
 <script src="{REVEAL_CDN}/plugin/highlight/highlight.js"></script>
 <script src="{REVEAL_CDN}/plugin/notes/notes.js"></script>
 <script src="{REVEAL_CDN}/plugin/math/math.js"></script>
+<div id="slide-page-counter"></div>
 <script>
 Reveal.initialize({{
   hash: true,
-  slideNumber: true,
+  slideNumber: false,
   transition: 'slide',
   plugins: [RevealMarkdown, RevealHighlight, RevealNotes, RevealMath.KaTeX]
 }});
+
+(function() {{
+  var counter = document.getElementById('slide-page-counter');
+  var hideTimer = null;
+
+  function showCounter() {{
+    var current = Reveal.getSlidePastCount() + 1;
+    var total = Reveal.getTotalSlides();
+    counter.textContent = current + ' / ' + total;
+    counter.classList.add('visible');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(function() {{
+      counter.classList.remove('visible');
+    }}, 1800);
+  }}
+
+  Reveal.on('slidechanged', showCounter);
+}})();
 </script>
 </body>
 </html>"""
@@ -129,11 +157,15 @@ Reveal.initialize({{
 def main():
     parser = argparse.ArgumentParser(description="Convert Markdown to reveal.js slides")
     parser.add_argument("inputs", nargs="+", help="Markdown file(s)")
-    parser.add_argument("-o", "--output", help="Output HTML file (default: <input>.html)")
+    parser.add_argument("-o", "--output", help="Output HTML file or directory")
     parser.add_argument("--theme", default=None, help=f"Theme: {', '.join(THEMES)}")
     parser.add_argument("--title", default=None, help="Presentation title")
     parser.add_argument("--css", default="", help="Extra CSS to inject")
+    parser.add_argument("--custom-theme", default=None, help="Path to a custom CSS theme file")
+    parser.add_argument("--logo", default=None, help="Path to a logo image file")
     args = parser.parse_args()
+
+    has_assets = args.custom_theme or args.logo
 
     # Read and concatenate inputs
     parts = []
@@ -154,11 +186,44 @@ def main():
     title = args.title or first_meta.get("title", Path(args.inputs[0]).stem)
     theme = args.theme or first_meta.get("theme", "black")
 
-    html_out = build_html(combined, title=title, theme=theme, custom_css=args.css)
+    if has_assets:
+        # Directory mode: create dir with index.html + assets
+        out_dir = Path(args.output) if args.output else Path(args.inputs[0]).with_suffix("")
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_path = args.output or Path(args.inputs[0]).with_suffix(".html")
-    Path(out_path).write_text(html_out, encoding="utf-8")
-    print(f"Created: {out_path}")
+        custom_theme_href = ""
+        if args.custom_theme:
+            ct = Path(args.custom_theme)
+            if not ct.exists():
+                print(f"Error: {args.custom_theme} not found", file=sys.stderr)
+                sys.exit(1)
+            dest = out_dir / ct.name
+            if ct.resolve() != dest.resolve():
+                shutil.copy2(ct, dest)
+            custom_theme_href = ct.name
+
+        logo_src = ""
+        if args.logo:
+            lp = Path(args.logo)
+            if not lp.exists():
+                print(f"Error: {args.logo} not found", file=sys.stderr)
+                sys.exit(1)
+            dest = out_dir / lp.name
+            if lp.resolve() != dest.resolve():
+                shutil.copy2(lp, dest)
+            logo_src = lp.name
+
+        html_out = build_html(combined, title=title, theme=theme, custom_css=args.css,
+                              custom_theme_href=custom_theme_href, logo_src=logo_src)
+
+        (out_dir / "index.html").write_text(html_out, encoding="utf-8")
+        print(f"Created: {out_dir}/index.html")
+    else:
+        # Single file mode
+        html_out = build_html(combined, title=title, theme=theme, custom_css=args.css)
+        out_path = Path(args.output) if args.output else Path(args.inputs[0]).with_suffix(".html")
+        out_path.write_text(html_out, encoding="utf-8")
+        print(f"Created: {out_path}")
 
 
 if __name__ == "__main__":
