@@ -1,0 +1,41 @@
+{
+  "skill_name": "iexs",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Give me iex code to filter a list of maps by a field value, then sort and take the top 3. Use something like a list of %{name: ..., score: ...} maps.",
+      "expected_output": "IEx-safe script with pipe chains wrapped in parens or flattened to nested calls, no bare multiline pipes, all modules fully qualified or aliased at top",
+      "files": [],
+      "expectations": [
+        "No bare pipe chains that start on one line and continue on the next without wrapping or aliasing",
+        "All Enum/Map/List module references are either fully qualified or aliased",
+        "The script is self-contained and can be pasted into a fresh iex session",
+        "Uses Enum.filter, Enum.sort_by (or similar), and Enum.take to accomplish the task"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I want to quickly test Ecto changesets in iex — show me how to cast and validate a changeset for a User schema with name (required, min 2 chars) and email (required, format validated). I'm running iex -S mix so the app is loaded.",
+      "expected_output": "IEx-safe script that aliases Ecto.Changeset, defines or references a User schema, creates a changeset, casts fields, adds validations, and inspects the result",
+      "files": [],
+      "expectations": [
+        "Ecto.Changeset is aliased or fully qualified — not just Changeset",
+        "No bare multiline pipes without wrapping",
+        "Shows how to call cast/3, validate_required/2, and validate_format/3 or validate_length/3",
+        "Script includes IO.inspect or similar to show changeset errors"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "write me an elixir snippet to try in iex — parse a JSON string into a map, then extract nested values safely handling missing keys",
+      "expected_output": "IEx-safe code that uses Jason.decode!/1 or Jason.decode/1, with safe nested access using get_in or Map.get with defaults, all modules qualified",
+      "files": [],
+      "expectations": [
+        "Uses Jason module with full qualification or alias",
+        "Shows safe nested key access (get_in, Map.get, or pattern matching)",
+        "No bare multiline pipes",
+        "Handles the missing key case explicitly (default value or pattern match)"
+      ]
+    }
+  ]
+}
